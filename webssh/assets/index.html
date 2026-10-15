@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sshd-lite webssh</title>
+<link rel="stylesheet" href="assets/vendor/xterm.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #1e1e1e; color: #ccc;
+    font-family: system-ui, sans-serif; display: flex; flex-direction: column; }
+  #bar { display: flex; gap: 8px; padding: 6px 10px; background: #2d2d2d;
+    align-items: center; font-size: 13px; }
+  #bar button { background: #3c3c3c; color: #ccc; border: 1px solid #555;
+    border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+  #bar button:hover { background: #505050; }
+  #term { flex: 1; min-height: 0; padding: 4px; }
+  #files { display: none; height: 40%; border-top: 2px solid #444;
+    overflow: auto; background: #252526; padding: 8px; font-size: 13px; }
+  #files table { border-collapse: collapse; width: 100%; }
+  #files td, #files th { text-align: left; padding: 2px 8px; }
+  #files tr:hover { background: #2a2d2e; }
+  #status { margin-left: auto; color: #8f8; }
+  #status.err { color: #f66; }
+  #drop { position: fixed; inset: 0; display: none; align-items: center;
+    justify-content: center; background: rgba(0,0,0,.6); font-size: 24px; }
+  #drop.on { display: flex; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="toggle-files">文件</button>
+  <button id="up">上传</button>
+  <button id="mkdir">新建目录</button>
+  <span id="cwd"></span>
+  <span id="status">connecting…</span>
+</div>
+<div id="term"></div>
+<div id="files"></div>
+<div id="drop">松开以上传到当前目录</div>
+<script src="assets/vendor/xterm.js"></script>
+<script src="assets/vendor/addon-fit.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

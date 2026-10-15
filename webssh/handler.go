@@ -68,10 +68,14 @@ func New(opts Options, base sshd.Config) (*Handler, error) {
 // Close releases the bridge (currently a no-op hook for future resources).
 func (h *Handler) Close() {}
 
-// Routes returns the HTTP mux. The "/" UI route is mounted by the embedded
-// frontend (assets.go); "/webssh" is the WebSocket endpoint.
+// Routes returns the HTTP mux: "/" serves the embedded UI, "/assets/"
+// serves the vendored files (http.FS roots the embed FS, so the URL
+// /assets/... maps to the embedded path assets/...), and "/webssh" is the
+// WebSocket endpoint.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", h.serveUI)
+	mux.Handle("GET /assets/", http.FileServer(http.FS(assetsFS)))
 	mux.HandleFunc("GET /webssh", h.handleWS)
 	return mux
 }

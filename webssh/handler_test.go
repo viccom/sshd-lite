@@ -5,8 +5,10 @@ package webssh
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -117,6 +119,60 @@ func TestWSTerminalRoundtrip(t *testing.T) {
 			t.Fatalf("timeout, output: %q", got.String())
 		default:
 		}
+	}
+}
+
+func TestUIServed(t *testing.T) {
+	srv := newTestServer(t, nil)
+	resp, err := srv.Client().Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "xterm") {
+		t.Fatal("index.html must reference xterm")
+	}
+}
+
+// TestVendorAssets verifies the /assets/ FileServer maps URL paths onto the
+// embedded FS (embed root is the package dir, so /assets/... -> assets/...)
+// and that the full vendor files made it into the binary.
+func TestVendorAssets(t *testing.T) {
+	srv := newTestServer(t, nil)
+	for _, tc := range []struct{ url, disk, marker string }{
+		{"/assets/vendor/xterm.js", "assets/vendor/xterm.js", "xterm"},
+		{"/assets/vendor/xterm.css", "assets/vendor/xterm.css", "xterm"},
+		{"/assets/vendor/addon-fit.js", "assets/vendor/addon-fit.js", "Fit"},
+		{"/assets/app.js", "assets/app.js", "MSG"},
+	} {
+		t.Run(tc.url, func(t *testing.T) {
+			resp, err := srv.Client().Get(srv.URL + tc.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status %d", resp.StatusCode)
+			}
+			fi, err := os.Stat(tc.disk)
+			if err != nil {
+				t.Fatalf("stat %s: %v", tc.disk, err)
+			}
+			if int64(len(body)) != fi.Size() {
+				t.Fatalf("%s: served %d bytes, on-disk %d", tc.url, len(body), fi.Size())
+			}
+			if !strings.Contains(string(body), tc.marker) {
+				t.Fatalf("body must contain %q", tc.marker)
+			}
+		})
 	}
 }
 
