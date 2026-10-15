@@ -146,6 +146,31 @@ U+FFFD, `exit` in the shell flips the page to `disconnected` and releases
 the session slot, and the Origin gate accepts `--webssh-origin` patterns
 while rejecting others (curl: pattern → 101, non-match → 403).
 
+## File panel & terminal UX (ported from mole's admin UI)
+
+The frontend is a vanilla-JS port of mole's proven admin implementation
+(`WebSSHPage.tsx` + `FilePanel.tsx`), speaking the same frame protocol:
+
+- Floating SFTP panel (fixed overlay — it never reflows the terminal grid,
+  which is what previously garbled full-screen apps like `htop` after
+  toggling the panel): draggable title bar, corner resize (min 320×300),
+  fullscreen toggle, dark/light themes.
+- Path bar with parent / editable path (Enter) / home / refresh / upload /
+  mkdir; upload progress bar; panel-scoped drag & drop with overlay;
+  delete with confirm; empty and error states.
+- Click a text file to preview: markdown renders through marked +
+  DOMPurify, source code through a vendored highlight.js bundle (core +
+  the same 24 languages mole registers), plain text pre-wrap. Other files
+  download on click.
+- Terminal: focus on connect, right-click copy/paste menu,
+  Ctrl+Shift+C/V shortcuts, in-terminal disconnect notice for abnormal
+  closes (code ≠ 1000) plus a reconnect button.
+
+Vendored libraries (no dev build chain; artifacts checked in under
+`assets/vendor/`): `marked.umd.js`, `marked-highlight.umd.js`,
+`purify.min.js` (copied from mole's node_modules) and `hljs.min.js`
+(bundled once with esbuild from mole's dependency tree).
+
 ## Known limitations
 
 - **Non-BMP characters (emoji) typed in the browser are dropped on Windows.**
