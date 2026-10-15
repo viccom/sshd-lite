@@ -168,7 +168,7 @@ func TestNormalizeKeepsClientAfterWebssh(t *testing.T) {
 
 func TestStartWebSSHRequiresToken(t *testing.T) {
 	t.Setenv("SSHD_WEBSSH_TOKEN", "")
-	err := startWebSSH(t.Context(), "", "", testBaseConfigForHook())
+	err := startWebSSH(t.Context(), "", "", "", testBaseConfigForHook())
 	if err == nil {
 		t.Fatal("empty token must error")
 	}

@@ -54,11 +54,12 @@ Notes:
 
 type serverCommand struct {
 	sshd.Config
-	Mosh        bool   `opts:"name=mosh,help=enable Mosh on the same UDP port (five-minute idle timeout)"`
-	Webssh      bool   `opts:"name=webssh,help=enable the browser terminal (requires -tags webssh build)"`
-	WebsshToken string `opts:"name=webssh-token,help=browser terminal token (or env SSHD_WEBSSH_TOKEN; required with --webssh)"`
-	WebsshPort  string `opts:"name=webssh-port,help=browser terminal HTTP port (default 8022)"`
-	Command     string `opts:"mode=cmdname"`
+	Mosh         bool   `opts:"name=mosh,help=enable Mosh on the same UDP port (five-minute idle timeout)"`
+	Webssh       bool   `opts:"name=webssh,help=enable the browser terminal (requires -tags webssh build)"`
+	WebsshToken  string `opts:"name=webssh-token,help=browser terminal token (or env SSHD_WEBSSH_TOKEN; required with --webssh)"`
+	WebsshPort   string `opts:"name=webssh-port,help=browser terminal HTTP port (default 8022)"`
+	WebsshOrigin string `opts:"name=webssh-origin,help=allowed WebSocket origins behind a reverse proxy (glob patterns like *.example.com; default same-origin only)"`
+	Command      string `opts:"mode=cmdname"`
 }
 
 type clientCommand struct {
@@ -133,7 +134,7 @@ func runServer(ctx context.Context, c *serverCommand) error {
 		c.Attach = mosh.RejectAttach
 	}
 	if c.Webssh {
-		if err := startWebSSH(ctx, c.WebsshToken, c.WebsshPort, c.Config); err != nil {
+		if err := startWebSSH(ctx, c.WebsshToken, c.WebsshPort, c.WebsshOrigin, c.Config); err != nil {
 			return err
 		}
 	}

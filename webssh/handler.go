@@ -25,7 +25,12 @@ type Options struct {
 	Token       string        // required; browsers pass ?token=
 	MaxSessions int           // concurrent WS terminal sessions (default 4)
 	IdleTimeout time.Duration // drop idle sessions (default 4h)
-	Logger      *slog.Logger
+	// OriginPatterns lists extra allowed WebSocket origins (path.Match glob
+	// syntax, e.g. "*.example.com"), for deployments behind a reverse proxy
+	// that rewrites the Host header so the browser origin no longer matches
+	// the request host. Empty keeps the default same-origin check.
+	OriginPatterns []string
+	Logger         *slog.Logger
 }
 
 const (
@@ -92,9 +97,12 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many sessions", http.StatusTooManyRequests)
 		return
 	}
-	// websocket.Accept applies same-origin checks by default; non-browser
-	// clients without an Origin header are allowed (matches mole).
-	c, err := websocket.Accept(w, r, nil)
+	// websocket.Accept applies same-origin checks by default (plus any
+	// configured OriginPatterns); non-browser clients without an Origin
+	// header are allowed (matches mole).
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: h.opts.OriginPatterns,
+	})
 	if err != nil {
 		return
 	}
@@ -222,13 +230,19 @@ func (h *Handler) serveSession(r *http.Request, c *websocket.Conn) {
 		cancel()
 	}()
 
-	// Read loop: browser frames -> terminal / files.
+	// Read loop: browser frames -> terminal / files. The context derives from
+	// sessCtx so a shell exit (which cancels it) unblocks the reader instead
+	// of leaking a dead session that holds one of the limited slots. The
+	// per-read deadline (idle timeout + one keep interval) is the safety net
+	// for a totally silent client and keeps the configured IdleTimeout
+	// effective rather than shadowed by a shorter hard-coded cap.
+	readDeadline := h.opts.IdleTimeout + keepInterval
 	for {
-		rctx, readCancel := context.WithTimeout(context.Background(), time.Hour)
+		rctx, readCancel := context.WithTimeout(sessCtx, readDeadline)
 		msgType, reader, err := c.Reader(rctx)
 		if err != nil {
 			readCancel()
-			return // closed, timed out, or protocol error
+			return // closed, cancelled, timed out, or protocol error
 		}
 		buf := make([]byte, 0, 4096)
 		b := make([]byte, 4096)

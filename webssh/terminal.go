@@ -37,7 +37,10 @@ func NewTerminal(client *ssh.Client, out io.Writer, cols, rows int) (*Terminal, 
 		return nil, fmt.Errorf("webssh: stdin pipe: %w", err)
 	}
 	sess.Stdout = out
-	sess.Stderr = out
+	// Stderr is deliberately left nil: the remote PTY merges stderr into the
+	// terminal stream, and wiring Stderr to the same writer would make the
+	// ssh library run two concurrent copy goroutines on it — a data race
+	// unless the caller's writer is mutex-protected.
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
 		ssh.TTY_OP_ISPEED: 14400,

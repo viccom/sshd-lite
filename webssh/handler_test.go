@@ -3,15 +3,19 @@
 package webssh
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -176,6 +180,81 @@ func TestVendorAssets(t *testing.T) {
 				t.Fatalf("body must contain %q", tc.marker)
 			}
 		})
+	}
+}
+
+// probeUpgrade sends a raw WebSocket upgrade request with the given Origin
+// header and returns the HTTP status code (101 on success). Raw TCP mirrors
+// what a browser does before any WS framing starts.
+func probeUpgrade(t *testing.T, srvURL, token, origin string) int {
+	t.Helper()
+	u, err := url.Parse(srvURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	req := "GET /webssh?token=" + token + " HTTP/1.1\r\n" +
+		"Host: " + u.Host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+	if origin != "" {
+		req += "Origin: " + origin + "\r\n"
+	}
+	req += "\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status line: %v", err)
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		t.Fatalf("bad status line: %q", line)
+	}
+	code, err := strconv.Atoi(fields[1])
+	if err != nil {
+		t.Fatalf("bad status line: %q", line)
+	}
+	return code
+}
+
+func TestOriginDefaultSameOrigin(t *testing.T) {
+	srv := newTestServer(t, nil) // no patterns configured
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rejection first: successful upgrades below hold session slots for a
+	// moment (the cap check runs before Accept's origin check), which would
+	// otherwise turn this 403 assertion into a 429.
+	if code := probeUpgrade(t, srv.URL, "test-token", "https://evil.example.com"); code != 403 {
+		t.Fatalf("cross-origin must be rejected, got %d", code)
+	}
+	if code := probeUpgrade(t, srv.URL, "test-token", ""); code != 101 {
+		t.Fatalf("no-Origin (non-browser client) should upgrade, got %d", code)
+	}
+	if code := probeUpgrade(t, srv.URL, "test-token", "https://"+u.Host); code != 101 {
+		t.Fatalf("same-origin should upgrade, got %d", code)
+	}
+}
+
+func TestOriginPatternsAllowConfiguredOrigins(t *testing.T) {
+	srv := newTestServer(t, func(o *Options) {
+		o.OriginPatterns = []string{"*.example.com"}
+	})
+	if code := probeUpgrade(t, srv.URL, "test-token", "https://evil.other.org"); code != 403 {
+		t.Fatalf("origin outside the pattern must stay rejected, got %d", code)
+	}
+	if code := probeUpgrade(t, srv.URL, "test-token", "https://sub.example.com"); code != 101 {
+		t.Fatalf("origin matching the pattern should upgrade, got %d", code)
 	}
 }
 

@@ -3,7 +3,6 @@
 package webssh
 
 import (
-	"bytes"
 	"os"
 	"runtime"
 	"strings"
@@ -33,7 +32,10 @@ func TestTerminalEcho(t *testing.T) {
 	}
 	defer cl.Close()
 
-	var out bytes.Buffer
+	// lockedBuffer (defined in handler_test.go): the ssh output goroutine and
+	// this polling test goroutine touch the buffer concurrently, and a plain
+	// bytes.Buffer would be a data race under -race.
+	var out lockedBuffer
 	term, err := NewTerminal(cl, &out, 80, 24)
 	if err != nil {
 		t.Fatalf("NewTerminal: %v", err)
@@ -60,7 +62,7 @@ func TestTerminalResizeAndClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cl.Close()
-	var out bytes.Buffer
+	var out lockedBuffer
 	term, err := NewTerminal(cl, &out, 80, 24)
 	if err != nil {
 		t.Fatalf("NewTerminal: %v", err)
