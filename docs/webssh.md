@@ -41,6 +41,7 @@ Without the tag the flag exists but errors with
 | `--webssh` | enable the browser terminal |
 | `--webssh-token` | access token (falls back to env `SSHD_WEBSSH_TOKEN`); **required** — startup fails without it |
 | `--webssh-port` | HTTP listen port (default `8022`) |
+| `--webssh-origin` | extra allowed WebSocket origins, comma-separated `path.Match` globs (e.g. `*.example.com`); default is same-origin only |
 
 Then open `http://<host>:8022/?token=<token>`. The token is also accepted as
 a `?token=` query parameter on the WebSocket itself, which is what the page
@@ -86,7 +87,9 @@ entries repeatedly and flagged `truncated`.
 - The loopback SSH keypair is generated at startup and lives only in memory;
   it is never written to disk and never crosses the network.
 - The WebSocket upgrade uses same-origin checks; non-browser clients without
-  an `Origin` header are allowed, matching mole's behavior.
+  an `Origin` header are allowed, matching mole's behavior. Deployments behind
+  a reverse proxy that rewrites the `Host` header (so the browser origin no
+  longer matches) must pass `--webssh-origin` with the proxy's host glob.
 - Token comparison is constant-time.
 - Defaults: 4 concurrent sessions (`429` beyond that), 4h idle timeout,
   64 KiB WS read limit, 30s server keepalive.
@@ -100,22 +103,34 @@ export SSHD_WEBSSH_TOKEN=$(head -c 24 /dev/urandom | base64)
 ```
 
 Point the sandbox's HTTPS subdomain at the webssh port and open
-`https://<subdomain>/?token=<token>`. Note the token will appear in the
-ingress proxy's access log when passed as a query parameter; rotate it per
-instance.
+`https://<subdomain>/?token=<token>`. If the URL proxy rewrites the `Host`
+header (the browser then sends `Origin: https://<subdomain>` while the
+request arrives with the proxy's host), allow it explicitly:
+
+```sh
+./sshd-lite-webssh --webssh --webssh-origin '*.app.workbuddy.host' ...
+```
+
+Note the token will appear in the ingress proxy's access log when passed as a
+query parameter; rotate it per instance.
 
 ## Test matrix
 
 | area | Windows | WSL (Ubuntu 24.04) |
 |---|---|---|
 | frame codec, bridge, SFTP, auth, session cap | pass | pass |
+| Origin gate (same-origin default, `--webssh-origin` globs) | pass | pass |
+| shell exit releases the session slot (regression) | skip (needs PTY) | pass |
 | PTY terminal (echo, resize, teardown) | skip (needs PTY) | pass |
 | WS terminal roundtrip, idle timeout | skip (needs PTY) | pass |
 
-Known environment noise on this host, reproducible on the unmodified
-upstream commit: `sshd/windows` e2e (temp-key ACL) and UDP-bind tests in the
-`mosh` package can fail intermittently on Windows when the OS reserved-port
-range collides; they pass on retry.
+All of the above also pass under `-race` on both platforms. Known
+environment noise on this host, reproducible on the unmodified upstream
+commit: `sshd/windows` e2e (temp-key ACL), UDP-bind tests in the `mosh`
+package, and the `client` package long-run test can fail intermittently on
+Windows/WSL (port collisions, `/run/sshd` setup); they pass on retry or on
+the other platform. `go vet` flags four `unsafe.Pointer` warnings in the
+upstream `winpty` package on Windows — pre-existing, untouched by this fork.
 
 ## Verified end-to-end (browser acceptance)
 
@@ -123,3 +138,22 @@ Executed against a real browser on Windows: terminal command echo, file
 panel directory listing, file delete, and directory creation (each confirmed
 on disk). Download uses a blob anchor; the transfer path is covered by
 `TestFileOpsRoundtrip` in the test suite.
+
+Review-fix round (re-verified in a real browser): 100 KiB upload
+byte-exact, two concurrent drag-dropped uploads both byte-exact (serialized
+queue), download byte-exact, CJK and 4-byte emoji output intact with zero
+U+FFFD, `exit` in the shell flips the page to `disconnected` and releases
+the session slot, and the Origin gate accepts `--webssh-origin` patterns
+while rejecting others (curl: pattern → 101, non-match → 403).
+
+## Known limitations
+
+- **Non-BMP characters (emoji) typed in the browser are dropped on Windows.**
+  The upstream winpty-based PTY input path never delivers 4-byte UTF-8 to
+  the shell (bash receives the line without them). BMP text, including CJK,
+  is intact in both directions, and the output direction renders 4-byte
+  characters correctly. This is upstream `winpty` behavior, not the webssh
+  protocol.
+- On shell exit, Windows teardown may log `Failed to interrupt/kill shell:
+  invalid argument` — upstream sshd-lite cleanup noise for an already-exited
+  process; harmless.

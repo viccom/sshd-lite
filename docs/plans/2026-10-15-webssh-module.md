@@ -2205,5 +2205,23 @@ git push -u origin feature/webssh
 ### 未执行/待办项（显式声明）
 
 1. **沙箱实测（计划 Task 10 Step 5）未执行**——需要真实沙箱环境与用户的透明代理，属人工部署环节。清单见计划原文。
-2. **IAB 环境下的上传/下载 UI 未点验**——自动化浏览器不支持文件选择器（`capability_unsupported`）；链路本身由 `TestFileOpsRoundtrip`（上传 2 分块 + 下载字节比对）覆盖，且目录创建/删除已在真实浏览器点验并落盘确认。
-3. **已知环境噪音**：`sshd/windows` e2e 与 `mosh` 包 UDP 绑定测试在本机 Windows 偶发失败（上游提交同样复现，重跑即过），与本模块无关。
+2. ~~**IAB 环境下的上传/下载 UI 未点验**~~ —— 已在审查修复轮（见下）补齐：经页面自身的上传链路（`uploadFile`/`doUpload`）验证 100 KiB 单文件与 2 文件并发上传逐字节精确，经 `.dl` 按钮 + `URL.createObjectURL` 拦截验证下载逐字节精确。
+3. **已知环境噪音**：`sshd/windows` e2e 与 `mosh` 包 UDP 绑定测试在本机 Windows 偶发失败（上游提交同样复现，重跑即过），与本模块无关；`client` 包长跑测试在 WSL 偶发超时同样属上游噪音。
+
+## 执行记录：审查修复轮（2026-10-15 深度审查后）
+
+深度代码审查发现 C1/H1/M1/M2/M3 五项缺陷 + 修复中暴露两项数据竞争，全部修复并复验：
+
+| # | 缺陷 | 修复 | 复验证据 |
+|---|---|---|---|
+| C1 | 上传 0 字节：`Blob.arrayBuffer()` 异步解析但循环同步推进，`UPLOAD_END` 先于任何数据帧上线 | `doUpload` 改 async 逐块 `await`，多文件经 `uploadChain` 串行链（服务端每会话仅跟踪单个在途上传） | 浏览器实测：100 KiB 上传逐字节精确、帧序 REQ→DATA×4→END 正确；2 文件并发上传均逐字节精确 |
+| H1 | shell 退出后会话泄漏：读循环 ctx 挂 `context.Background()`，shell 退出取消不了阻塞的 Reader，死会话占住 MaxSessions 槽位 | 读循环 ctx 改挂 `sessCtx`（shell 退出 → `term.Done()` → cancel → Reader 解除阻塞） | WSL 回归测试 `TestShellExitClosesSession`（marker 文件证明 shell 真执行过，修复前红 10.2s/修复后绿 2.3s）；浏览器实测 `exit` 后状态翻 `disconnected`、`ws.readyState=3` |
+| M1 | UTF-8 跨帧撕裂：每帧独立 `TextDecoder` 解码，多字节字符跨 WS 帧被拆成两个 U+FFFD | 终端流独立 `dataDec` 流式解码器（`{stream:true}`），JSON 帧仍用整帧解码 | 浏览器实测：中文 4 字回显/输出完整零 U+FFFD；4 字节 emoji 经 `printf` 十六进制转义产出后 `term.write` 收到完整 U+1F389 |
+| M2 | 反代改写 Host 后同源校验必 403，沙箱 URL 代理场景不可用 | `Options.OriginPatterns`（`path.Match` glob）+ `--webssh-origin` flag（逗号分隔），默认仍同源 | Go 测试：默认跨源 403/配置后命中 101；curl 冒烟：pattern→101、非匹配→403、同源→101 |
+| M3 | `IdleTimeout` 被硬编码 1h 读上限遮蔽：配置的超时永不生效 | 读超时 = `IdleTimeout + keepInterval`（safety net），空闲判定仍由 watchdog 按 `IdleTimeout` 执行 | 代码审查复验 + 全量测试；watchdog 轮询间隔 D8 修正保证短超时及时触发 |
+| R1 | `sess.Stdout` 与 `sess.Stderr` 指向同一 writer：ssh 库起两个并发拷贝协程写同一 `bytes.Buffer`（`-race` 实报） | PTY 场景 stderr 本就并入终端流，`Stderr` 留 nil 并注释原因；测试改用 `lockedBuffer` | WSL `-race` 全绿（修复前实报 DATA RACE） |
+| R2 | 防御性收口：会话中第二个 `UPLOAD_REQ` 未关旧句柄 | `msgFileUploadReq` 关闭并替换在途上传文件句柄 | 代码复验（服务端单在途上传语义与 C1 前端串行化对偶） |
+
+修复轮回归门禁（全部通过）：Windows `go build ./...`、`go vet`（改动包）、main 包 default/tagged、`go test -race -tags webssh ./webssh/`（ok 2.6s）；WSL 同步后 `go test -race -tags webssh -count=1 ./webssh/`（ok 6.0s，含 H1 回归测试）+ main tagged（ok）。
+
+修复轮新发现的上游限制（非缺陷，记录于 `docs/webssh.md` 已知限制）：Windows winpty PTY 输入路径丢弃非 BMP 字符（emoji 键入不到 shell；输出方向完好）；shell 退出时 winpty 收尾打印 `Failed to interrupt/kill shell` ERROR 属上游既有噪音。
