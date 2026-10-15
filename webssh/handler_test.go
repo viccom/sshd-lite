@@ -5,12 +5,15 @@ package webssh
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,4 +194,72 @@ func wsRead(ctx context.Context, t *testing.T, c *websocket.Conn) (byte, []byte,
 		return 0, nil, nil // ignore text frames
 	}
 	return decodeFrame(buf.Bytes())
+}
+
+// lockedBuffer is a concurrency-safe log sink: the server logs from its own
+// goroutines while the test reads.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestIdleTimeoutClosesConnection(t *testing.T) {
+	if strings.EqualFold(runtime.GOOS, "windows") {
+		t.Skip("session needs a PTY; run under WSL")
+	}
+	var logs lockedBuffer
+	srv := newTestServer(t, func(o *Options) {
+		o.IdleTimeout = 2 * time.Second
+		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	})
+	c, _, err := wsDial(t, srv.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	var closeErr error
+	for {
+		_, _, err := wsRead(ctx, t, c)
+		if err != nil {
+			closeErr = err
+			break
+		}
+		if time.Since(start) > 15*time.Second {
+			t.Fatal("connection not closed by idle watchdog within 15s")
+		}
+	}
+	elapsed := time.Since(start)
+	var ce websocket.CloseError
+	if !errors.As(closeErr, &ce) || ce.Code != websocket.StatusPolicyViolation {
+		t.Fatalf("want policy-violation close, got %v", closeErr)
+	}
+	if elapsed > 8*time.Second {
+		t.Fatalf("closed too late: %v", elapsed)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(logs.String(), "session closed") && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, want := range []string{"session open", "idle timeout", "session closed"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("audit log missing %q; logs: %s", want, logs.String())
+		}
+	}
 }

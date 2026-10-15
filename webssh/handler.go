@@ -189,11 +189,22 @@ func (h *Handler) serveSession(r *http.Request, c *websocket.Conn) {
 			}
 		}
 	}()
-	// Idle watchdog.
+	// Idle watchdog. The poll interval is capped by the idle timeout so
+	// short configured timeouts still fire promptly (a fixed 30s poll would
+	// let a 2s timeout linger until the first tick).
+	idlePoll := keepInterval
+	if h.opts.IdleTimeout/2 < idlePoll {
+		idlePoll = h.opts.IdleTimeout / 2
+	}
+	if idlePoll <= 0 {
+		idlePoll = time.Millisecond
+	}
 	go func() {
+		t := time.NewTicker(idlePoll)
+		defer t.Stop()
 		for {
 			select {
-			case <-time.After(keepInterval):
+			case <-t.C:
 				if time.Since(time.UnixMilli(s.lastAct.Load())) > h.opts.IdleTimeout {
 					h.log.Warn("webssh: idle timeout")
 					c.Close(websocket.StatusPolicyViolation, "idle timeout")
