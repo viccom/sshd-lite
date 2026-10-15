@@ -4,7 +4,11 @@ const MSG = { DATA: 0x01, RESIZE: 0x02, KEEP: 0x03,
   DOWNLOAD_REQ: 0x08, DELETE_REQ: 0x09, MKDIR_REQ: 0x0A, READ_REQ: 0x0B,
   LIST_RESP: 0x0C, DATA_RESP: 0x0D, ACK_RESP: 0x0E, READ_RESP: 0x0F };
 
-const dec = new TextDecoder(); // one shared decoder for shell output + JSON frames
+const dec = new TextDecoder();     // JSON frames (whole-message decode)
+// Terminal output needs a separate STREAMING decoder: SSH chunks can split a
+// multi-byte UTF-8 char across two WS frames, and decoding each frame in
+// isolation turns the halves into U+FFFD replacement chars.
+const dataDec = new TextDecoder();
 
 const qs = new URLSearchParams(location.search);
 let token = qs.get("token") || localStorage.getItem("webssh_token") || "";
@@ -51,7 +55,7 @@ ws.onmessage = (ev) => {
   const b = new Uint8Array(ev.data);
   const t = b[0], payload = b.subarray(1);
   switch (t) {
-    case MSG.DATA: term.write(dec.decode(payload)); break;
+    case MSG.DATA: term.write(dataDec.decode(payload, { stream: true })); break;
     case MSG.KEEP: break;
     case MSG.LIST_RESP: renderList(JSON.parse(dec.decode(payload))); break;
     case MSG.DATA_RESP:
@@ -122,21 +126,27 @@ document.getElementById("up").onclick = () => {
   input.onchange = () => uploadFile(input.files[0]);
   input.click();
 };
+// Uploads are serialized through one chain: the server tracks a single
+// in-flight upload per session, so concurrent files (drag & drop of several
+// files) would interleave their DATA frames and corrupt each other. Chunks
+// must also be awaited one by one — Blob.arrayBuffer() resolves
+// asynchronously, so firing the sends up front used to put UPLOAD_END on the
+// wire before any data frame (uploads produced 0-byte files).
+let uploadChain = Promise.resolve();
 function uploadFile(f) {
+  uploadChain = uploadChain.then(() => doUpload(f)).catch(() => {});
+}
+async function doUpload(f) {
   const dest = (cwd === "/" ? "" : cwd) + "/" + f.name;
   send(MSG.UPLOAD_REQ, JSON.stringify({ path: dest, size: f.size }));
   const CHUNK = 32768;
-  let off = 0;
-  const pump = () => {
-    while (off < f.size && ws.bufferedAmount < 4 * CHUNK) {
-      const slice = f.slice(off, off + CHUNK);
-      slice.arrayBuffer().then((ab) => ws.send(frameRaw(MSG.UPLOAD_DATA, new Uint8Array(ab))));
-      off += CHUNK;
-    }
-    if (off < f.size) setTimeout(pump, 50);
-    else ws.send(frame(MSG.UPLOAD_END));
-  };
-  pump();
+  for (let off = 0; off < f.size; off += CHUNK) {
+    const ab = await f.slice(off, off + CHUNK).arrayBuffer();
+    // keep the socket queue shallow (mirrors mole's 4-chunk buffer)
+    while (ws.bufferedAmount > 4 * CHUNK) await new Promise((r) => setTimeout(r, 50));
+    ws.send(frameRaw(MSG.UPLOAD_DATA, new Uint8Array(ab)));
+  }
+  send(MSG.UPLOAD_END);
 }
 // drag & drop upload onto file panel
 const drop = document.getElementById("drop");

@@ -163,6 +163,11 @@ func (s *wsSession) fileUpload(typ byte, payload []byte) {
 			return
 		}
 		s.uploadMu.Lock()
+		// Defensive: a second REQ without END replaces (and closes) the
+		// previous in-flight upload instead of leaking its file handle.
+		if s.uploadFile != nil {
+			s.uploadFile.Close()
+		}
 		s.uploadFile = f
 		s.uploadErr = nil
 		s.uploadMu.Unlock()
