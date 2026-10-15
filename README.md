@@ -30,6 +30,7 @@ go install github.com/jpillora/sshd-lite@latest
 - Local and reverse TCP forwarding
 - Built-in SSH client with known-host verification
 - Mosh-compatible terminal sessions over UDP
+- Browser terminal + SFTP over a single WebSocket (`webssh` build tag, added by this fork)
 - Ed25519 and RSA server keys
 - Linux, macOS, and Windows binaries with no runtime dependencies
 
@@ -72,6 +73,38 @@ sshd-lite client --mosh --port 2222 user@host
 See the [Mosh guide](docs/mosh-guide.md) for setup, interoperability, session
 lifetime, terminal behavior, limitations, and Go API usage.
 
+## Browser terminal (webssh)
+
+> Added by this fork; not present in upstream `jpillora/sshd-lite`. The
+> release binaries and `i.jpillora.com` installer above do not include it —
+> build from source with the build tag.
+
+A build-tag-gated module that turns sshd-lite into a browser-reachable SSH
+endpoint: an embedded xterm.js UI speaks one WebSocket to an in-process sshd
+bridge, so the process needs no OS sshd and no inbound port other than its
+own HTTP listener — built for sandboxes whose only ingress is an HTTPS
+subdomain behind a URL proxy. The UI provides an interactive shell plus an
+SFTP file panel (upload/download with progress, directory management, and
+markdown/source-code preview).
+
+Build and run:
+
+```sh
+go build -tags webssh -o sshd-lite-webssh .
+./sshd-lite-webssh --webssh --webssh-token <token> --webssh-port 8022 none
+```
+
+Then open `http://<host>:8022/?token=<token>`. Without the tag the flags
+exist but refuse to start, and no new dependency is linked into the default
+build. Tokens are constant-time compared and required; sessions are capped
+(default 4) and dropped after an idle timeout (default 4h). Behind a reverse
+proxy that rewrites the `Host` header, pass `--webssh-origin` with a glob
+such as `*.example.com` to accept the proxy's browser origin. The wire
+protocol is compatible with the mole project's webssh tunnel.
+
+See the [webssh module guide](docs/webssh.md) for the protocol table,
+security model, sandbox deployment, and verification matrix.
+
 ## Configuration summary
 
 - The authentication argument may be `user:pass`, an unrestricted
@@ -102,6 +135,7 @@ dependency boundaries, listener lifecycle, and extension points.
 
 - [Mosh guide](docs/mosh-guide.md)
 - [Mosh compatibility and verification](docs/mosh-compatibility.md)
+- [webssh module guide](docs/webssh.md) (fork addition)
 - [Architecture](docs/architecture.md)
 - [In-process Mosh example](example/mosh/main.go)
 
