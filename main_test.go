@@ -148,3 +148,28 @@ func TestGetEnvInt(t *testing.T) {
 		t.Fatalf("CLI max pending handshakes = %d", server.MaxPendingHandshakes)
 	}
 }
+
+func testBaseConfigForHook() sshd.Config {
+	return sshd.Config{LogQuiet: true}
+}
+
+func TestRootBoolFlagIncludesWebssh(t *testing.T) {
+	if !rootBoolFlag("--webssh") {
+		t.Fatal("--webssh must be a root bool flag or normalizeCLIArgs eats the next token")
+	}
+}
+
+func TestNormalizeKeepsClientAfterWebssh(t *testing.T) {
+	got := normalizeCLIArgs([]string{"sshd-lite", "--webssh", "client"})
+	if len(got) < 3 || got[1] != "--webssh" || got[2] != "client" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestStartWebSSHRequiresToken(t *testing.T) {
+	t.Setenv("SSHD_WEBSSH_TOKEN", "")
+	err := startWebSSH(t.Context(), "", "", "", testBaseConfigForHook())
+	if err == nil {
+		t.Fatal("empty token must error")
+	}
+}
