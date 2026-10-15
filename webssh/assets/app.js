@@ -10,9 +10,15 @@ const MSG = { DATA: 0x01, RESIZE: 0x02, KEEP: 0x03,
 
 const qs = new URLSearchParams(location.search);
 let token = qs.get("token") || localStorage.getItem("webssh_token") || "";
-while (!token) {
+if (!token) {
   token = prompt("webssh token:") || "";
   if (token) localStorage.setItem("webssh_token", token);
+  else {
+    // cancelled: fail visibly instead of re-prompting in a loop
+    document.getElementById("dot").className = "dot offline";
+    document.getElementById("status").textContent = "缺少 token（用 ?token= 访问）";
+    throw new Error("webssh: no token");
+  }
 }
 
 const statusEl = document.getElementById("status");
@@ -231,9 +237,12 @@ function placePanel() {
 }
 
 function closePanel() {
+  // Hides the panel only. The WS file handler stays registered: nulling it
+  // mid-transfer used to drop the completion ACK and permanently wedge
+  // fp.uploading/downloading (mole recovers via component remount; our fp
+  // state persists, so the handler must outlive the panel's visibility).
   fp.open = false;
   filesEl.style.display = "none";
-  fileHandler = null;
   document.getElementById("toggle-files").classList.remove("active");
 }
 
@@ -243,7 +252,6 @@ document.getElementById("toggle-files").onclick = () => {
   filesEl.style.display = "flex";
   applyPanelChrome();
   document.getElementById("toggle-files").classList.add("active");
-  fileHandler = handleFileMessage;
   getList(fp.path);
 };
 
@@ -296,16 +304,21 @@ document.getElementById("fp-resize").addEventListener("mousedown", (e) => {
 // nothing below this line runs before the WS is up; the panel starts hidden
 
 // drag & drop upload onto the panel
-filesEl.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); fpDropover.style.display = "flex"; });
-filesEl.addEventListener("dragleave", (e) => { e.preventDefault(); e.stopPropagation(); fpDropover.style.display = "none"; });
+// dragenter/leave fire on every child element; a depth counter keeps the
+// overlay stable while the cursor moves across the panel's children
+let dragDepth = 0;
+filesEl.addEventListener("dragenter", (e) => { e.preventDefault(); e.stopPropagation(); dragDepth++; fpDropover.style.display = "flex"; });
+filesEl.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); });
+filesEl.addEventListener("dragleave", (e) => { e.preventDefault(); e.stopPropagation(); if (--dragDepth <= 0) { dragDepth = 0; fpDropover.style.display = "none"; } });
 filesEl.addEventListener("drop", (e) => {
   e.preventDefault();
   e.stopPropagation();
+  dragDepth = 0;
   fpDropover.style.display = "none";
   [...e.dataTransfer.files].forEach(uploadFile);
 });
 
-fileHandler = null; // set while the panel is open
+fileHandler = handleFileMessage; // resident: processes file frames even while the panel is hidden
 
 function handleFileMessage(msgType, payload) {
   try {
@@ -325,22 +338,26 @@ function handleFileMessage(msgType, payload) {
       case MSG.ACK_RESP: {
         const ack = JSON.parse(dec.decode(payload));
         fp.previewLoading = false;
-        if (ack.ok && fp.downloading && fp.chunks.length > 0) {
-          if (fp.reading) {
-            // preview: chunks were decoded incrementally by fp.readDec
-            const content = fp.readDecResult();
-            fp.preview = { name: fp.reading.name, content, mode: fp.reading.mode };
-            fp.reading = null;
-          } else {
-            const blob = new Blob(fp.chunks.map((c) => c));
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = ack.name || "download";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(a.href);
-          }
+        // Ack payloads discriminate completions: read acks carry
+        // mode:"read" + name, download acks carry name without mode, upload
+        // acks carry only size. Matching on those (instead of requiring
+        // chunks.length > 0) lets an empty file — which produces zero data
+        // frames — still complete its preview/download instead of silently
+        // doing nothing, and keeps unrelated acks from closing a transfer.
+        if (ack.ok && ack.mode === "read" && fp.reading) {
+          fp.preview = { name: fp.reading.name, content: fp.readDecResult(), mode: fp.reading.mode };
+          fp.reading = null;
+          fp.chunks = [];
+          fp.downloading = false;
+        } else if (ack.ok && ack.name && !ack.mode && fp.downloading && !fp.reading) {
+          const blob = new Blob(fp.chunks.map((c) => c));
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = ack.name;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(a.href);
           fp.chunks = [];
           fp.downloading = false;
         } else if (!ack.ok) {
@@ -479,6 +496,9 @@ function renderError() {
   el.style.display = fp.error ? "block" : "none";
 }
 function renderList() {
+  // rebuilding fp-body replaces the scrollable list element; keep the scroll
+  // offset so refresh/delete/upload acks don't jump long listings to the top
+  const savedScroll = (fpBody.querySelector(".fp-list") || {}).scrollTop || 0;
   const rows = fp.files.map((f) =>
     "<tr data-name=\"" + esc(f.name) + "\">" +
     "<td><span class='fname" + (f.is_dir ? " dir" : "") + "'>" +
@@ -523,6 +543,8 @@ function renderList() {
       del.onclick = (e) => { e.stopPropagation(); handleDelete(f); };
     }
   });
+  const listEl = fpBody.querySelector(".fp-list");
+  if (listEl) listEl.scrollTop = savedScroll;
   renderProgress();
   renderError();
 }
