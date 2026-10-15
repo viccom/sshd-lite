@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/jpillora/sftp"
 	"github.com/jpillora/sshd-lite/sshd"
 	"golang.org/x/crypto/ssh"
 )
@@ -123,6 +124,13 @@ type wsSession struct {
 	term      *Terminal
 	sshClient *ssh.Client
 	lastAct   atomic.Int64 // unix millis
+
+	// SFTP state: lazy client plus one in-flight upload.
+	sftp       *sftp.Client
+	sftpMu     sync.Mutex
+	uploadFile *sftp.File
+	uploadErr  error
+	uploadMu   sync.Mutex
 }
 
 func (h *Handler) serveSession(r *http.Request, c *websocket.Conn) {
