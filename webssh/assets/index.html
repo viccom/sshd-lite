@@ -9,14 +9,28 @@
   html, body { margin: 0; height: 100%; background: #1e1e1e; color: #ccc;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     display: flex; flex-direction: column; }
-  #bar { display: flex; gap: 8px; padding: 6px 10px; background: #2d2d2d;
-    align-items: center; font-size: 13px; }
-  #bar button { background: #3c3c3c; color: #ccc; border: 1px solid #555;
-    border-radius: 4px; padding: 3px 10px; cursor: pointer; }
-  #bar button:hover { background: #505050; }
+  /* top status bar (ported from mole WebSSHPage: 断开 | title | dot + text,
+     action buttons right-aligned, shown only while connected) */
+  #bar { display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: #111827; color: #fff; font-size: 13px;
+    flex-shrink: 0; }
+  #bar .grp { display: flex; align-items: center; gap: 8px; }
+  #bar button { background: #374151; color: #fff; border: none;
+    border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  #bar button:hover { background: #4b5563; }
+  #bar #disconnect { background: transparent; padding: 4px 8px; }
+  #bar #disconnect:hover { background: #b91c1c; }
+  #bar .sep { color: #6b7280; }
+  #bar #title { font-family: Menlo, Monaco, Consolas, monospace; color: #e5e7eb; }
+  #bar #status { color: #9ca3af; font-size: 12px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; }
+  .dot.connecting { background: #facc15; animation: dotpulse 1.5s ease-in-out infinite; }
+  .dot.online { background: #4ade80; }
+  .dot.offline { background: #f87171; }
+  @keyframes dotpulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  #bar #toggle-files.active { background: #2563eb; }
+  #bar #toggle-files.active:hover { background: #3b82f6; }
   #term { flex: 1; min-height: 0; padding: 4px; }
-  #status { margin-left: auto; color: #8f8; }
-  #status.err { color: #f66; }
 
   /* ---- floating file panel (ported from mole admin FilePanel) ---- */
   #files { position: fixed; z-index: 60; display: none; flex-direction: column;
@@ -220,11 +234,19 @@
 </head>
 <body>
 <div id="bar">
-  <button id="toggle-files">文件</button>
-  <button id="copy">复制</button>
-  <button id="paste">粘贴</button>
-  <span id="status">connecting…</span>
-  <button id="reconnect" style="display:none">重新连接</button>
+  <div class="grp">
+    <button id="disconnect" title="断开连接">✕ 断开</button>
+    <span class="sep">|</span>
+    <span id="title"></span>
+    <span id="dot" class="dot connecting"></span>
+    <span id="status">连接中...</span>
+  </div>
+  <div class="grp">
+    <button id="toggle-files" style="display:none">📁 文件</button>
+    <button id="copy" style="display:none" title="复制 (Ctrl+Shift+C)">复制</button>
+    <button id="paste" style="display:none" title="粘贴 (Ctrl+Shift+V)">粘贴</button>
+    <button id="reconnect" style="display:none">重新连接</button>
+  </div>
 </div>
 <div id="term"></div>
 <div id="files" class="theme-dark">

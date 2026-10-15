@@ -16,7 +16,25 @@ while (!token) {
 }
 
 const statusEl = document.getElementById("status");
-const reconnectBtn = document.getElementById("reconnect");
+const dotEl = document.getElementById("dot");
+document.getElementById("title").textContent = location.host;
+
+// Connection state machine, mirroring mole's WebSSHPage: dot color + text on
+// the left, action buttons on the right only while connected, 重新连接 while
+// disconnected. The file panel unmounts (hides) on disconnect like mole's
+// `showFilePanel && status === 'connected'` guard.
+function setState(s, msg) {
+  dotEl.className = "dot " + (s === "online" ? "online" : s === "connecting" ? "connecting" : "offline");
+  statusEl.textContent = s === "connecting" ? "连接中..." :
+    s === "online" ? "已连接" :
+    s === "disconnected" ? "已断开" : (msg || "错误");
+  const show = (id, on) => { document.getElementById(id).style.display = on ? "" : "none"; };
+  show("toggle-files", s === "online");
+  show("copy", s === "online");
+  show("paste", s === "online");
+  show("reconnect", s !== "online" && s !== "connecting");
+  if (s !== "online") closePanel();
+}
 
 const term = new Terminal({
   cursorBlink: true,
@@ -55,18 +73,16 @@ function sendJSON(t, obj) { sendRaw(t, new TextEncoder().encode(JSON.stringify(o
 function sendResize() { sendJSON(MSG.RESIZE, { cols: term.cols, rows: term.rows }); }
 
 ws.onopen = () => {
-  statusEl.textContent = "online";
+  setState("online");
   sendResize();
   setInterval(() => sendRaw(MSG.KEEP, new Uint8Array(0)), 30000);
   term.focus();
 };
 ws.onclose = (e) => {
-  statusEl.textContent = "disconnected";
-  statusEl.className = "err";
-  reconnectBtn.style.display = "";
+  setState("disconnected");
   if (e.code !== 1000) term.write("\r\n\x1b[31m连接已断开\x1b[0m");
 };
-ws.onerror = () => { statusEl.textContent = "error"; statusEl.className = "err"; };
+ws.onerror = () => setState("error", "WebSocket 连接错误");
 
 ws.onmessage = (ev) => {
   const b = new Uint8Array(ev.data);
@@ -87,7 +103,8 @@ term.onData((d) => sendRaw(MSG.DATA, new TextEncoder().encode(d)));
 
 window.addEventListener("resize", () => { fit.fit(); sendResize(); });
 window.addEventListener("load", () => { fit.fit(); sendResize(); }); // late layout settle
-reconnectBtn.onclick = () => location.reload();
+document.getElementById("reconnect").onclick = () => location.reload();
+document.getElementById("disconnect").onclick = () => ws.close(1000);
 
 // ---- copy/paste (ported from WebSSHPage: buttons, context menu, shortcuts) ----
 function copySelection() {
@@ -190,7 +207,10 @@ const fp = {
 };
 
 function applyPanelChrome() {
-  filesEl.className = fp.theme + (fp.fullscreen ? " fullscreen" : "");
+  // CSS variables live under #files.theme-dark/.theme-light — the prefix is
+  // mandatory; without it every --fp-* var is undefined and the panel
+  // renders with a transparent background (blends into the terminal).
+  filesEl.className = "theme-" + fp.theme + (fp.fullscreen ? " fullscreen" : "");
   document.getElementById("fp-theme").textContent = fp.theme === "dark" ? "☀" : "☾";
   document.getElementById("fp-theme").title = fp.theme === "dark" ? "切换亮色主题" : "切换暗色主题";
   document.getElementById("fp-fullscreen").textContent = fp.fullscreen ? "⊡" : "⊞";
@@ -210,18 +230,24 @@ function placePanel() {
   filesEl.style.height = fp.size.h + "px";
 }
 
+function closePanel() {
+  fp.open = false;
+  filesEl.style.display = "none";
+  fileHandler = null;
+  document.getElementById("toggle-files").classList.remove("active");
+}
+
 document.getElementById("toggle-files").onclick = () => {
-  if (fp.open) { fp.open = false; filesEl.style.display = "none"; fileHandler = null; return; }
+  if (fp.open) { closePanel(); return; }
   fp.open = true;
   filesEl.style.display = "flex";
   applyPanelChrome();
+  document.getElementById("toggle-files").classList.add("active");
   fileHandler = handleFileMessage;
   getList(fp.path);
 };
 
-document.getElementById("fp-close").onclick = () => {
-  fp.open = false; filesEl.style.display = "none"; fileHandler = null;
-};
+document.getElementById("fp-close").onclick = closePanel;
 document.getElementById("fp-theme").onclick = () => {
   fp.theme = fp.theme === "dark" ? "light" : "dark";
   applyPanelChrome(); render();
