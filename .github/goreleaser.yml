@@ -6,7 +6,9 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-      - -tags webssh
+      # goreleaser passes each list item to go build as ONE argv element, so
+      # the tag must use the -tags=value form instead of a split "-tags value"
+      - -tags=webssh
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.buildDate={{.Date}}
     goos:
