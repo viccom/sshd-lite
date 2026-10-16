@@ -6,8 +6,9 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
+      - -tags webssh
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.buildDate={{.Date}}
     goos:
       - linux
       - darwin

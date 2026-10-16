@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -21,7 +22,23 @@ import (
 	"github.com/jpillora/sshd-lite/xssh"
 )
 
-var version string = "0.0.0-src" //set via ldflags
+var version string = "0.0.0-src" //set via ldflags (goreleaser: git tag)
+var commit string = "none"       //set via ldflags (goreleaser: full git sha)
+var buildDate string = "unknown" //set via ldflags (goreleaser: RFC3339 date)
+
+// displayVersion renders the release identity as <tag>-<hash>-<build date>;
+// source builds without ldflags keep the plain default so dev binaries do
+// not grow a "-none-unknown" suffix.
+func displayVersion() string {
+	if commit == "none" {
+		return version
+	}
+	short := commit
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return fmt.Sprintf("%s-%s-%s", version, short, buildDate)
+}
 
 const authArg = `
 <auth> must be set to one of:
@@ -79,12 +96,12 @@ func newCLI() (opts.Opts, *serverCommand, *clientCommand) {
 	client := &clientCommand{}
 	cli := opts.New(server).
 		Name("sshd-lite").
-		Version(version).
+		Version(displayVersion()).
 		Repo("github.com/jpillora/sshd-lite").
 		PkgRepo().
 		DocAfter("args", "authArg", authArg).
 		DocBefore("version", "notes", notes).
-		AddCommand(opts.New(client).Name("client").Summary("connect to an SSH server").Version(version))
+		AddCommand(opts.New(client).Name("client").Summary("connect to an SSH server").Version(displayVersion()))
 	return cli, server, client
 }
 

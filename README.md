@@ -75,9 +75,10 @@ lifetime, terminal behavior, limitations, and Go API usage.
 
 ## Browser terminal (webssh)
 
-> Added by this fork; not present in upstream `jpillora/sshd-lite`. The
-> release binaries and `i.jpillora.com` installer above do not include it —
-> build from source with the build tag.
+> Added by this fork; not present in upstream `jpillora/sshd-lite`. This
+> fork's tag releases ship binaries and Docker images built with the module
+> enabled; the upstream installer above does not — build from source with
+> the build tag.
 
 A build-tag-gated module that turns sshd-lite into a browser-reachable SSH
 endpoint: an embedded xterm.js UI speaks one WebSocket to an in-process sshd
@@ -96,11 +97,13 @@ go build -tags webssh -o sshd-lite-webssh .
 
 Then open `http://<host>:8022/?token=<token>`. Without the tag the flags
 exist but refuse to start, and no new dependency is linked into the default
-build. Tokens are constant-time compared and required; sessions are capped
-(default 4) and dropped after an idle timeout (default 4h). Behind a reverse
-proxy that rewrites the `Host` header, pass `--webssh-origin` with a glob
-such as `*.example.com` to accept the proxy's browser origin. The wire
-protocol is compatible with the mole project's webssh tunnel.
+build. `sshd-lite --version` reports the release identity as
+`<git tag>-<git hash>-<build date>`. Tokens are constant-time compared and
+required; sessions are capped (default 4) and dropped after an idle timeout
+(default 4h). Behind a reverse proxy that rewrites the `Host` header, pass
+`--webssh-origin` with a glob such as `*.example.com` to accept the proxy's
+browser origin. The wire protocol is compatible with the mole project's
+webssh tunnel.
 
 See the [webssh module guide](docs/webssh.md) for the protocol table,
 security model, sandbox deployment, and verification matrix.

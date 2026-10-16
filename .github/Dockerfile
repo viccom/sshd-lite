@@ -4,12 +4,15 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_DATE=unknown
 COPY . /src
 WORKDIR /src
 ENV CGO_ENABLED=0
 RUN GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM="${TARGETVARIANT#v}" go build \
   -trimpath \
-  -ldflags "-s -w -X main.version=$VERSION" \
+  -tags webssh \
+  -ldflags "-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildDate=$BUILD_DATE" \
   -o /tmp/bin
 # run stage
 FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659

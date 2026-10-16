@@ -173,3 +173,21 @@ func TestStartWebSSHRequiresToken(t *testing.T) {
 		t.Fatal("empty token must error")
 	}
 }
+
+func TestDisplayVersion(t *testing.T) {
+	oldV, oldC, oldD := version, commit, buildDate
+	defer func() { version, commit, buildDate = oldV, oldC, oldD }()
+
+	// source build without ldflags: keep the plain default, no noise suffix
+	version, commit, buildDate = "v1.2.3", "none", "unknown"
+	if got := displayVersion(); got != "v1.2.3" {
+		t.Fatalf("dev build: got %q", got)
+	}
+
+	// release build (goreleaser injects full sha + RFC3339 date)
+	version, commit, buildDate = "v1.2.3", "0123456789abcdef0123456789abcdef01234567", "2026-10-16T08:00:00Z"
+	want := "v1.2.3-0123456-2026-10-16T08:00:00Z"
+	if got := displayVersion(); got != want {
+		t.Fatalf("release build: got %q want %q", got, want)
+	}
+}
